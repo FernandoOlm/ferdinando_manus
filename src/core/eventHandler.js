@@ -55,6 +55,23 @@ export function registerEventHandlers(sock) {
     }
   });
 
+  // Evento de votos em enquetes
+  sock.ev.on("messages.update", async (updates) => {
+    for (const update of updates) {
+      if (update.update.pollUpdates) {
+        const pollUpdate = update.update.pollUpdates[0];
+        const pollCreationId = update.key.id;
+        const voterJid = pollUpdate.voterJid;
+        const voterNumber = voterJid.split("@")[0];
+        
+        // O Baileys envia o voto criptografado, mas podemos logar que houve um voto
+        console.log(`\x1b[34m[ENQUETE]\x1b[0m Voto recebido de \x1b[36m${voterNumber}\x1b[0m na enquete \x1b[33m${pollCreationId}\x1b[0m`);
+        
+        // Aqui você poderia implementar uma lógica para contar os votos se descriptografar
+      }
+    }
+  });
+
   // Evento de novas mensagens
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
@@ -66,9 +83,12 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
+    // Trata diferentes tipos de mensagens
     const text = msg.message.conversation || 
                  msg.message.extendedTextMessage?.text || 
-                 (msg.message.imageMessage ? "[Imagem]" : "[Mídia]");
+                 (msg.message.imageMessage ? "[Imagem]" : 
+                  msg.message.pollCreationMessage ? `[Enquete: ${msg.message.pollCreationMessage.name}]` : 
+                  "[Mídia]");
 
     // Log visual no console (limpo)
     const typeLabel = isGroup ? "\x1b[35m[GRUPO]\x1b[0m" : "\x1b[32m[PV]\x1b[0m";
@@ -86,7 +106,7 @@ export function registerEventHandlers(sock) {
       const commandResult = await handleCommand(sock, msg, text);
       if (commandResult) {
         await sendHumanizedMessage(sock, jid, commandResult);
-        return; // Interrompe para não passar pela IA
+        return; 
       }
     }
 

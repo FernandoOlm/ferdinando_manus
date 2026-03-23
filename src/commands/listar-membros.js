@@ -1,44 +1,37 @@
-// ================================
-// INÍCIO DO ARQUIVO listar-membros.js
-// ================================
-
+/**
+ * Comando !listar-membros - Lista todos os participantes do grupo.
+ */
 export async function comandoListarMembros(msg, sock) {
+  const jid = msg.key.remoteJid;
+
+  if (!jid.endsWith("@g.us")) {
+    return "Esse comando só funciona em grupos, mano. 🏢";
+  }
+
   try {
-    const jid = msg.key.remoteJid;
-    const meta = await sock.groupMetadata(jid);
+    const metadata = await sock.groupMetadata(jid);
+    const participants = metadata.participants;
 
-    const numeros = [];
-
-    for (const participante of meta.participants) {
-      const wid = participante.id;
-
-      if (!wid) continue;
-
-      const partes = wid.split("@");
-      const numero = partes[0];
-      const dominio = partes[1];
-
-      if (dominio === "c.us" || dominio === "s.whatsapp.net") {
-        numeros.push(`+${numero}`);
-      }
+    if (!participants || participants.length === 0) {
+      return "Não achei ninguém nesse grupo... estranho, né? 🤨";
     }
 
-    const textoFinal =
-      `${meta.subject}\n\n` +
-      (numeros.length ? numeros.join("\n") : "Nenhum número encontrado.");
+    let textoFinal = `👥 *MEMBROS DO GRUPO: ${metadata.subject}*\n\n`;
+    
+    const lista = participants.map((p, index) => {
+      const numero = p.id.split("@")[0];
+      const adminTag = (p.admin === "admin" || p.admin === "superadmin") ? " ⭐" : "";
+      return `${index + 1}. +${numero}${adminTag}`;
+    }).join("\n");
 
-    // 🔥 ENVIA DIRETO PRO GRUPO
+    textoFinal += lista;
+    textoFinal += `\n\nTotal: ${participants.length} membros.`;
+
     await sock.sendMessage(jid, { text: textoFinal });
-
-  } catch (erro) {
-    console.error("Erro ao listar membros:", erro);
-
-    await sock.sendMessage(msg.key.remoteJid, {
-      text: "Erro ao listar membros."
-    });
+    
+    return { status: "ok", total: participants.length };
+  } catch (e) {
+    console.error("❌ Erro ao listar membros:", e.message);
+    return "Deu erro pra buscar a galera do grupo... 😵";
   }
 }
-
-// ================================
-// FIM DO ARQUIVO listar-membros.js
-// ================================
