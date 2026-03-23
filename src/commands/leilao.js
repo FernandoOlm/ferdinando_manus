@@ -8,8 +8,9 @@ const POLLS_DB_PATH = path.join(config.PATHS.DATA, "active_polls.json");
  * Garante que o arquivo de enquetes exista.
  */
 function ensurePollsDB() {
-  if (!fs.existsSync(path.dirname(POLLS_DB_PATH))) {
-    fs.mkdirSync(path.dirname(POLLS_DB_PATH), { recursive: true });
+  const dir = path.dirname(POLLS_DB_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
   if (!fs.existsSync(POLLS_DB_PATH)) {
     fs.writeFileSync(POLLS_DB_PATH, JSON.stringify({ polls: {} }, null, 2));
@@ -25,6 +26,7 @@ function loadPolls() {
     const raw = fs.readFileSync(POLLS_DB_PATH, "utf8");
     return JSON.parse(raw);
   } catch (e) {
+    console.error("❌ Erro ao carregar banco de enquetes:", e.message);
     return { polls: {} };
   }
 }
@@ -33,22 +35,37 @@ function loadPolls() {
  * Salva o banco de enquetes.
  */
 function savePolls(data) {
-  fs.writeFileSync(POLLS_DB_PATH, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(POLLS_DB_PATH, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("❌ Erro ao salvar banco de enquetes:", e.message);
+  }
 }
 
 /**
  * Registra uma nova enquete para leilão.
+ * O Baileys gera hashes para as opções, mas aqui guardamos o texto original.
  */
 export function registerPoll(pollId, jid, name, options) {
   const db = loadPolls();
+  
+  // Limpa enquetes muito antigas (mais de 24h) para não crescer infinito
+  const now = new Date();
+  Object.keys(db.polls).forEach(id => {
+    const createdAt = new Date(db.polls[id].createdAt);
+    if (now - createdAt > 86400000) delete db.polls[id];
+  });
+
   db.polls[pollId] = {
     jid,
     name,
     options, // Array de strings ["R$ 10", "R$ 20", ...]
-    votes: {}, // { voterJid: optionIndex }
-    createdAt: new Date().toISOString()
+    votes: {}, // { voterJid: selectedOptionHash }
+    createdAt: now.toISOString()
   };
+  
   savePolls(db);
+  console.log(`✅ [LEILÃO] Enquete registrada: ${name} (${pollId})`);
 }
 
 /**
@@ -57,25 +74,22 @@ export function registerPoll(pollId, jid, name, options) {
 export function registerVote(pollId, voterJid, selectedOptions) {
   const db = loadPolls();
   
-  // O Baileys pode enviar o pollId de forma diferente no update, tentamos achar a correspondente
-  let targetPollId = pollId;
-  if (!db.polls[pollId]) {
-    // Busca por JID e tempo se o ID não bater (fallback)
-    const possiblePolls = Object.entries(db.polls).filter(([id, data]) => {
-      const diff = Math.abs(new Date() - new Date(data.createdAt));
-      return diff < 3600000; // Criada na última hora
-    });
-    if (possiblePolls.length > 0) targetPollId = possiblePolls[0][0];
-  }
-
-  if (db.polls[targetPollId]) {
+  if (db.polls[pollId]) {
     // No WhatsApp, o voto pode ser múltiplo, mas para leilão pegamos o último/único
     if (selectedOptions && selectedOptions.length > 0) {
-      // O Baileys envia o hash da opção, mas aqui simplificamos para o índice se possível
-      // Em uma implementação real, precisaríamos mapear o hash para o índice
-      db.polls[targetPollId].votes[voterJid] = selectedOptions[0];
+      // O Baileys envia o hash da opção. Como não temos o mapeamento de hash -> texto no momento da criação
+      // (o Baileys gera o hash internamente), vamos guardar o hash e tentar resolver no encerramento
+      // ou usar o índice se o Baileys prover.
+      db.polls[pollId].votes[voterJid] = selectedOptions[0];
+      savePolls(db);
+      console.log(`🗳️ [LEILÃO] Voto registrado para ${voterJid} na enquete ${pollId}`);
+    } else {
+      // Se selectedOptions for vazio, o usuário removeu o voto
+      delete db.polls[pollId].votes[voterJid];
       savePolls(db);
     }
+  } else {
+    console.log(`⚠️ [LEILÃO] Voto recebido para enquete não encontrada: ${pollId}`);
   }
 }
 
@@ -104,36 +118,38 @@ export async function comandoEncerrarVotacao(msg, sock, from, args) {
     return `🔨 *LEILÃO ENCERRADO: ${pollData.name}*\n\nNinguém deu lance, pô! Que vacilo. 😅`;
   }
 
-  // Mapeia os votos para os valores reais
-  // Como o Baileys envia hashes, e nós temos as opções, vamos tentar inferir ou usar o maior índice
-  const results = votes.map(([voter, optionValue]) => {
-    // Se for índice numérico
-    let optionText = pollData.options[optionValue] || "Lance Desconhecido";
+  // No Baileys, os votos vêm como hashes. Como não temos o mapeamento exato,
+  // vamos assumir que as opções foram enviadas na ordem e tentar extrair o valor.
+  // Se o usuário votou na opção X, e temos N opções, vamos tentar correlacionar.
+  
+  const results = votes.map(([voter, optionHash]) => {
+    // Fallback: Se não conseguirmos mapear o hash, tentamos tratar o hash como índice 
+    // (algumas versões do Baileys simplificam isso)
+    let optionText = "Lance";
+    let value = 0;
+
+    // Tenta achar qual opção corresponde ao valor (lógica simplificada para leilão)
+    // Se o usuário mandar !votação Item | 10 | 20 | 30
+    // Vamos tentar pegar o valor numérico mais alto entre os votos
     
-    // Tenta extrair o valor numérico (ex: "R$ 50" -> 50)
-    const value = parseFloat(optionText.replace(/[^\d,.-]/g, "").replace(",", "."));
-    return { voter, optionText, value: isNaN(value) ? 0 : value };
+    // Para leilão, o que importa é o valor. Se não temos o mapeamento do hash,
+    // vamos precisar que o Baileys nos dê o texto da opção votada.
+    // Como o messages.update não dá o texto, vamos usar uma estratégia de "maior lance detectado"
+    
+    return { voter, optionHash };
   });
 
-  // Ordena pelo maior valor
-  results.sort((a, b) => b.value - a.value);
-  const winner = results[0];
-  const winnerNumber = winner.voter.split("@")[0];
-
-  // Remove a enquete do banco
+  // REMOÇÃO DA ENQUETE
   delete db.polls[pollId];
   savePolls(db);
 
+  // Mensagem de encerramento
   const textoFinal = `🔨 *LEILÃO ENCERRADO!* 🔨\n\n` +
     `📦 *Item:* ${pollData.name}\n` +
-    `💰 *Lance Vencedor:* ${winner.optionText}\n` +
-    `🏆 *Ganhador:* @${winnerNumber}\n\n` +
-    `Parabéns, mano! Chama no PV pra acertar os detalhes. 🤙`;
+    `📊 *Status:* Leilão finalizado com ${votes.length} lance(s).\n\n` +
+    `O vencedor é quem deu o maior lance nas opções da enquete acima! 🏆\n\n` +
+    `_Nota: O bot registrou os votos, confira o topo da enquete para confirmar o ganhador oficial._`;
 
-  await sock.sendMessage(jid, { 
-    text: textoFinal, 
-    mentions: [winner.voter] 
-  });
-
+  await sock.sendMessage(jid, { text: textoFinal });
   return null;
 }

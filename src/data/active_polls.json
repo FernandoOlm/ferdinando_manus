@@ -1,0 +1,18 @@
+{
+  "polls": {
+    "POLL_12345": {
+      "jid": "123456789@g.us",
+      "name": "Pikachu Holo",
+      "options": [
+        "R$ 10",
+        "R$ 20",
+        "R$ 30"
+      ],
+      "votes": {
+        "voter1@s.whatsapp.net": "hash_option_0",
+        "voter2@s.whatsapp.net": "hash_option_2"
+      },
+      "createdAt": "2026-03-23T14:04:05.680Z"
+    }
+  }
+}

@@ -63,12 +63,11 @@ export function registerEventHandlers(sock) {
         const pollUpdate = update.update.pollUpdates[0];
         const pollCreationId = update.key.id;
         const voterJid = pollUpdate.voterJid;
-        const voterNumber = voterJid.split("@")[0];
         
         // Registra o voto no sistema de leilão
-        registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
-        
-        console.log(`\x1b[34m[LEILÃO]\x1b[0m Voto recebido de \x1b[36m${voterNumber}\x1b[0m na enquete \x1b[33m${pollCreationId}\x1b[0m`);
+        if (pollUpdate.vote && pollUpdate.vote.selectedOptions) {
+          registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
+        }
       }
     }
   });
@@ -84,7 +83,7 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
-    // DETECÇÃO DE ENQUETE (BAILEYS ESTRUTURA)
+    // DETECÇÃO DE ENQUETE (BAILEYS ESTRUTURA V1, V2, V3)
     const pollCreation = msg.message.pollCreationMessage || 
                          msg.message.pollCreationMessageV2 || 
                          msg.message.pollCreationMessageV3;
