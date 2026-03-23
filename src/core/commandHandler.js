@@ -22,22 +22,29 @@ async function hasPermission(sock, jid, senderNumber, cmdConfig) {
   if (!cmdConfig.admin) return true;
 
   // Verifica se é o ROOT
-  if (senderNumber === config.ROOT_ID.replace(/@.*/, "")) return true;
+  const rootNumber = config.ROOT_ID.replace(/@.*/, "");
+  if (senderNumber === rootNumber) return true;
 
   // Verifica se é admin do grupo
   if (jid.endsWith("@g.us")) {
-    const metadata = await sock.groupMetadata(jid);
-    const isAdmin = metadata.participants.some(
-      p => p.id.replace(/@.*/, "") === senderNumber && (p.admin === "admin" || p.admin === "superadmin")
-    );
-    if (isAdmin) return true;
+    try {
+      const metadata = await sock.groupMetadata(jid);
+      const isAdmin = metadata.participants.some(
+        p => p.id.replace(/@.*/, "") === senderNumber && (p.admin === "admin" || p.admin === "superadmin")
+      );
+      if (isAdmin) return true;
+    } catch (e) {
+      console.error("❌ Erro ao buscar metadata do grupo:", e.message);
+    }
   }
 
   // Verifica no arquivo de autorizados
   try {
-    const authDB = JSON.parse(fs.readFileSync(config.PATHS.AUTH, "utf8"));
-    const groupAuth = authDB.grupos[jid];
-    if (groupAuth?.autorizados?.includes(senderNumber)) return true;
+    if (fs.existsSync(config.PATHS.AUTH)) {
+      const authDB = JSON.parse(fs.readFileSync(config.PATHS.AUTH, "utf8"));
+      const groupAuth = authDB.grupos[jid];
+      if (groupAuth?.autorizados?.includes(senderNumber)) return true;
+    }
   } catch (e) {}
 
   return false;
@@ -55,7 +62,8 @@ export async function handleCommand(sock, msg, text) {
   if (!cmdConfig) return null;
 
   const jid = msg.key.remoteJid;
-  const senderNumber = (msg.key.participant || msg.key.remoteJid).replace(/@.*/, "");
+  const sender = msg.key.participant || msg.key.remoteJid;
+  const senderNumber = sender.replace(/@.*/, "");
 
   // Validar permissão
   const allowed = await hasPermission(sock, jid, senderNumber, cmdConfig);
@@ -74,14 +82,21 @@ export async function handleCommand(sock, msg, text) {
     }
 
     // Executa o comando
+    // Passamos os argumentos corretamente para as funções
     const result = await fn(msg, sock, senderNumber, args.slice(1));
 
-    // Formata o retorno
+    // Se a função já enviou a mensagem (como o !all faz), retornamos null para não duplicar
+    if (result?.status === "ok" || result?.status === "sucesso") {
+      return null; 
+    }
+
+    // Formata o retorno caso a função retorne algo para ser enviado pelo handler
     if (typeof result === "string") return result;
     if (result?.mensagem) return result.mensagem;
     if (result?.texto) return result.texto;
     
-    return "Comando executado, blz? ✅";
+    // Se não retornou nada específico mas deu certo
+    return null; 
   } catch (e) {
     console.error(`❌ Erro ao executar comando ${cmdName}:`, e.message);
     return "Deu erro aqui pra rodar esse comando... 😵";
