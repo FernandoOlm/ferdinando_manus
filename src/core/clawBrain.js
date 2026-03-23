@@ -1,15 +1,17 @@
-// INÍCIO clawBrain.js — IA + Sistema Profissional
-
 import fs from "fs";
-import path from "path";
-import { aiGenerateReply_Unique01 } from "./aiClient.js";
+import { aiGenerateReply } from "./aiClient.js";
 import { executarAcoesAutomaticas_Unique01 } from "../actions/index.js";
-import { isFriend, setFriend } from "./friendManager.js";
+import { setFriend } from "./friendManager.js";
+import { config } from "../config/index.js";
 
-// ------------------ UTIL ------------------
-function compactarResposta_Unique01(t) {
-  if (!t) return "";
-  return t
+/**
+ * Limpa e compacta a resposta da IA para evitar problemas de formatação no WhatsApp.
+ * @param {string} text - O texto a ser compactado.
+ * @returns {string} - O texto limpo.
+ */
+function compactResponse(text) {
+  if (!text) return "";
+  return text
     .replace(/@\d+/g, "")
     .replace(/<@\d+>/g, "")
     .replace(/\n+/g, " ")
@@ -17,90 +19,81 @@ function compactarResposta_Unique01(t) {
     .trim();
 }
 
-// ------------------ SISTEMA PV ------------------
-async function verificarSistemaPV(msgObj) {
-
+/**
+ * Verifica restrições em conversas privadas (PV).
+ * @param {Object} msgObj - O objeto da mensagem.
+ * @returns {Promise<string|null>} - Mensagem de erro ou null se permitido.
+ */
+async function checkPVSecurity(msgObj) {
   const jid = msgObj?.key?.remoteJid;
   if (!jid || jid.endsWith("@g.us")) return null;
 
   const raw = msgObj?.key?.participant || jid;
   const fromClean = raw.replace(/@.*/, "");
 
-  const texto =
-    msgObj?.message?.conversation ||
-    msgObj?.message?.extendedTextMessage?.text ||
-    "";
+  if (fs.existsSync(config.PATHS.BANS)) {
+    const bansDB = JSON.parse(fs.readFileSync(config.PATHS.BANS, "utf8"));
+    const isBanned = bansDB.global?.some(b => b.alvo === fromClean);
 
-  const textoLower = texto.toLowerCase();
-
-  const bansPath = path.resolve("src/data/bans.json");
-
-  if (fs.existsSync(bansPath)) {
-    const bansDB = JSON.parse(fs.readFileSync(bansPath, "utf8"));
-    const banGlobal = bansDB.global?.find(b => b.alvo === fromClean);
-
-    if (banGlobal) {
+    if (isBanned) {
       return "Seu acesso foi bloqueado. Contate a administração.";
     }
   }
 
-  if (textoLower.includes("sou de menor")) {
-    return "Protocolo de segurança ativado.";
+  const text = (msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || "").toLowerCase();
+  if (text.includes("sou de menor")) {
+    return "Protocolo de segurança ativado. Acesso restrito.";
   }
 
   return null;
 }
 
-// ------------------ IA NORMAL ------------------
-async function processarIANormal(msgObj) {
-
-  const texto =
-    msgObj?.message?.conversation ||
-    msgObj?.message?.extendedTextMessage?.text ||
-    "";
-
+/**
+ * Processa uma conversa normal através da IA.
+ * @param {Object} msgObj - O objeto da mensagem.
+ * @returns {Promise<string>} - A resposta gerada.
+ */
+async function processNormalAI(msgObj) {
+  const text = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || "";
   const jid = msgObj?.key?.remoteJid;
-  if (!jid || !texto) return "";
 
-  if (texto.toLowerCase().includes("amigo")) {
+  if (!jid || !text) return "";
+
+  // Registro de amizade
+  if (text.toLowerCase().includes("amigo")) {
     setFriend(jid);
-    return "Registro confirmado.";
+    return "Registro confirmado! Agora somos parças. 🤙";
   }
 
-  const acao = await executarAcoesAutomaticas_Unique01(texto, jid);
-  if (acao) return compactarResposta_Unique01(acao);
+  // Ações automáticas (ex: preços, enquetes)
+  const autoAction = await executarAcoesAutomaticas_Unique01(text, jid);
+  if (autoAction) return compactResponse(autoAction);
 
-  const r = await aiGenerateReply_Unique01(texto);
-  return compactarResposta_Unique01(r);
+  // Resposta da IA
+  const reply = await aiGenerateReply(text);
+  return compactResponse(reply);
 }
 
-// ------------------ CENTRAL ------------------
-export async function clawBrainProcess_Unique01(msgObj) {
+/**
+ * Processador central de inteligência do bot.
+ * @param {Object} msgObj - O objeto da mensagem.
+ * @returns {Promise<string>} - A resposta final a ser enviada.
+ */
+export async function clawBrainProcess(msgObj) {
+  // 1. Segurança em PV
+  const pvSecurityMsg = await checkPVSecurity(msgObj);
+  if (pvSecurityMsg) return pvSecurityMsg;
 
-  // 🔥 1️⃣ Sistema PV tem prioridade
-  const sistemaPV = await verificarSistemaPV(msgObj);
-  if (sistemaPV) return sistemaPV;
-
-  // 🔥 2️⃣ COMANDOS NÃO PASSAM PELA IA
+  // 2. Tratamento de Comandos (se vierem marcados como tal)
   if (msgObj?.tipo === "comando" && msgObj?.comando) {
-
     const dados = msgObj?.dados || {};
-
-    // Caso comando já tenha formatado resposta estruturada
     if (typeof dados === "string") return dados;
-
-    if (dados?.mensagem) return dados.mensagem;
-    if (dados?.texto) return dados.texto;
-    if (dados?.anuncioIA) return dados.anuncioIA;
-    if (dados?.despedida) return dados.despedida;
-
-    if (dados?.motivo) return "Operação não permitida.";
-
-    return "Comando executado.";
+    return dados.mensagem || dados.texto || dados.anuncioIA || dados.despedida || "Comando executado com sucesso.";
   }
 
-  // 🔥 3️⃣ Conversa normal
-  return await processarIANormal(msgObj);
+  // 3. Conversa normal
+  return await processNormalAI(msgObj);
 }
 
-// FIM clawBrain.js
+// Alias para compatibilidade
+export const clawBrainProcess_Unique01 = clawBrainProcess;
