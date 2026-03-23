@@ -13,9 +13,8 @@ const messageQueue = new Map();
  * @param {Object} sock - A instância do socket.
  * @param {string} jid - O ID do chat.
  * @param {string} text - O texto a ser enviado.
- * @param {Object} quoted - A mensagem que está sendo respondida.
  */
-async function sendHumanizedMessage(sock, jid, text, quoted) {
+async function sendHumanizedMessage(sock, jid, text) {
   if (!text) return;
 
   // 1. Simula "digitando..."
@@ -29,9 +28,9 @@ async function sendHumanizedMessage(sock, jid, text, quoted) {
   
   await new Promise((resolve) => setTimeout(resolve, typingTime));
 
-  // 3. Para de digitar e envia
+  // 3. Para de digitar e envia (SEM CITAR A MENSAGEM ANTERIOR)
   await sock.sendPresenceUpdate("paused", jid);
-  await sock.sendMessage(jid, { text }, { quoted });
+  await sock.sendMessage(jid, { text });
 }
 
 /**
@@ -53,7 +52,7 @@ export function registerEventHandlers(sock) {
         if (banDetectado) continue;
 
         // Boas-vindas humanizada
-        await sendHumanizedMessage(sock, grupoId, `👋 Olá @${numero}!\n\n${bvConfig.mensagem}`, null);
+        await sendHumanizedMessage(sock, grupoId, `👋 Olá @${numero}!\n\n${bvConfig.mensagem}`);
       } catch (e) {
         console.error("❌ Erro ao processar entrada no grupo:", e.message);
       }
@@ -125,7 +124,8 @@ export function registerEventHandlers(sock) {
 
           const resposta = await clawBrainProcess_Unique01(consolidatedMsg);
           if (resposta && typeof resposta === "string") {
-            await sendHumanizedMessage(sock, jid, resposta, queueData.lastMsg);
+            // ENVIA SEM CITAR A MENSAGEM (quoted: null)
+            await sendHumanizedMessage(sock, jid, resposta);
           }
         } catch (e) {
           console.error("❌ Erro no processamento humanizado:", e.message);

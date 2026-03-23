@@ -69,8 +69,8 @@ async function processNormalAI(msgObj) {
   const autoAction = await executarAcoesAutomaticas_Unique01(text, jid);
   if (autoAction) return compactResponse(autoAction);
 
-  // Resposta da IA
-  const reply = await aiGenerateReply(text);
+  // Resposta da IA (PASSANDO O JID PARA MANTER O HISTÓRICO)
+  const reply = await aiGenerateReply(text, jid);
   return compactResponse(reply);
 }
 
