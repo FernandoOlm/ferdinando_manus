@@ -1,56 +1,44 @@
-// INÍCIO aiClient.js — Versão Profissional
-
-import Groq from "groq-sdk";
-import dotenv from "dotenv";
-dotenv.config();
+import { Groq } from "groq-sdk";
+import { config } from "../config/index.js";
 
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+  apiKey: config.GROQ_API_KEY,
 });
 
-export async function aiGenerateReply_Unique01(prompt) {
+/**
+ * Gera uma resposta da IA usando o Groq SDK.
+ * @param {string} prompt - O prompt do usuário.
+ * @param {string} [systemPrompt] - Prompt de sistema opcional para sobrescrever o padrão.
+ * @returns {Promise<string>} - A resposta gerada pela IA.
+ */
+export async function aiGenerateReply(prompt, systemPrompt = config.AI.SYSTEM_PROMPT) {
+  if (!config.GROQ_API_KEY) {
+    console.error("❌ GROQ_API_KEY não configurada.");
+    return "Tô meio perdido aqui, sem chave de acesso... 😵‍💫";
+  }
+
   try {
-
-    const systemPrompt = `
-Você é um assistente profissional, claro, objetivo e educado.
-
-DIRETRIZES:
-- Responda de forma formal e direta.
-- Seja direto, claro e estruturado.
-- Não use gírias.
-- Não use humor.
-- Não use ironia.
-- Não invente informações.
-- Não mencione que é uma IA, salvo se solicitado.
-- Quando necessário, organize a resposta em tópicos.
-- Seja útil, técnico e preciso.
-- seja o mais direto possivel e responda apenas o perguntado.
-- não de detalhes sobre o que foi executado.
-- Não seja redundante.
-- use o minimo possivel sobre os comandos executados.
-- Seja muito profissional.
-- Evite respostas longas.
-`;
-
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt },
       ],
-      temperature: 0.4, // 🔥 Mais previsível e profissional
-      max_completion_tokens: 400,
+      model: config.AI.MODEL,
+      temperature: config.AI.TEMPERATURE,
+      max_completion_tokens: config.AI.MAX_TOKENS,
     });
 
-    return (
-      completion.choices[0]?.message?.content ||
-      "Não foi possível gerar a resposta no momento."
-    );
-
-  } catch (err) {
-    console.error("Erro no GROQ:", err);
-    return "Ocorreu um erro ao processar sua solicitação. Tente novamente.";
+    return completion.choices[0]?.message?.content || "Fiquei sem palavras agora... 😶";
+  } catch (error) {
+    console.error("❌ Erro ao gerar resposta da IA:", error.message);
+    
+    if (error.status === 429) {
+      return "Calma aí, muita gente falando ao mesmo tempo! Dá um segundinho... 🧘‍♂️";
+    }
+    
+    return "Deu um nó aqui no meu cérebro... Tenta de novo? 😵";
   }
 }
 
-// FIM aiClient.js
+// Alias para compatibilidade legada
+export const aiGenerateReply_Unique01 = aiGenerateReply;
