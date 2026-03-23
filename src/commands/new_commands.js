@@ -2,6 +2,7 @@ import { aiGenerateReply } from "../core/aiClient.js";
 import fs from "fs";
 import path from "path";
 import { config } from "../config/index.js";
+import { registerPoll } from "./leilao.js";
 
 /**
  * !resumo - Resume as últimas mensagens do grupo.
@@ -82,7 +83,7 @@ export async function cmdIAImagem(msg, sock, from, args) {
 }
 
 /**
- * !votação - Cria uma enquete rápida.
+ * !votação - Cria uma enquete rápida e registra no sistema de leilão.
  */
 export async function cmdVotacao(msg, sock, from, args) {
   const full = args.join(" ");
@@ -91,14 +92,23 @@ export async function cmdVotacao(msg, sock, from, args) {
 
   const pergunta = partes[0];
   const opcoes = partes.slice(1);
+  const jid = msg.key.remoteJid;
 
-  await sock.sendMessage(msg.key.remoteJid, {
+  // Envia a enquete
+  const sent = await sock.sendMessage(jid, {
     poll: {
       name: pergunta,
       values: opcoes,
       selectableCount: 1
     }
   });
+
+  // REGISTRO IMEDIATO NO SISTEMA DE LEILÃO (USANDO O ID DA MENSAGEM ENVIADA)
+  if (sent && sent.key && sent.key.id) {
+    console.log(`📝 [LEILÃO] Registrando enquete enviada: ${pergunta} (ID: ${sent.key.id})`);
+    registerPoll(sent.key.id, jid, pergunta, opcoes);
+  }
+
   return null;
 }
 

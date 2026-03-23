@@ -55,7 +55,7 @@ export function registerEventHandlers(sock) {
         const pollCreationId = update.key.id;
         const voterJid = pollUpdate.voterJid;
         
-        console.log(`🗳️ [DEBUG-VOTO] Recebido voto de ${voterJid} na enquete ${pollCreationId}`);
+        console.log(`🗳️ [LEILÃO] Voto recebido de ${voterJid} na enquete ${pollCreationId}`);
         
         if (pollUpdate.vote && pollUpdate.vote.selectedOptions) {
           registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
@@ -75,22 +75,29 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
-    // --- DEBUG BRUTO DE ENQUETE ---
-    const pollCreation = msg.message.pollCreationMessage || 
-                         msg.message.pollCreationMessageV2 || 
-                         msg.message.pollCreationMessageV3;
+    // --- DETECÇÃO PROFUNDA DE ENQUETE ---
+    // Procura em qualquer lugar da estrutura da mensagem por pollCreationMessage
+    const findPoll = (obj) => {
+      if (!obj || typeof obj !== 'object') return null;
+      if (obj.pollCreationMessage || obj.pollCreationMessageV2 || obj.pollCreationMessageV3) {
+        return obj.pollCreationMessage || obj.pollCreationMessageV2 || obj.pollCreationMessageV3;
+      }
+      for (const key in obj) {
+        const found = findPoll(obj[key]);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const pollCreation = findPoll(msg.message);
 
     if (pollCreation) {
-      console.log(`📝 [DEBUG-ENQUETE] Detectada criação de enquete!`);
-      console.log(`📝 [DEBUG-ENQUETE] Nome: ${pollCreation.name}`);
-      console.log(`📝 [DEBUG-ENQUETE] Opções: ${pollCreation.options?.map(o => o.optionName).join(", ")}`);
-      console.log(`📝 [DEBUG-ENQUETE] ID da Mensagem: ${msg.key.id}`);
-      
+      console.log(`📝 [LEILÃO] Enquete detectada via Deep Scan: ${pollCreation.name}`);
       const pollName = pollCreation.name;
-      const options = pollCreation.options.map(o => o.optionName);
+      const options = pollCreation.options?.map(o => o.optionName) || [];
       registerPoll(msg.key.id, jid, pollName, options);
     }
-    // ------------------------------
+    // ------------------------------------
 
     // Trata diferentes tipos de mensagens para texto
     const text = msg.message.conversation || 
