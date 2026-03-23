@@ -3,6 +3,7 @@ import { atualizarGrupo_Unique03 } from "../utils/groups.js";
 import { banCheckEntrada_Unique01 } from "../commands/ban.js";
 import { lerBV } from "./index.js";
 import { clawBrainProcess_Unique01 } from "./clawBrain.js";
+import { handleCommand } from "./commandHandler.js";
 import { config } from "../config/index.js";
 
 // Fila de mensagens para comportamento humano
@@ -10,9 +11,6 @@ const messageQueue = new Map();
 
 /**
  * Simula o comportamento humano de digitação e delay.
- * @param {Object} sock - A instância do socket.
- * @param {string} jid - O ID do chat.
- * @param {string} text - O texto a ser enviado.
  */
 async function sendHumanizedMessage(sock, jid, text) {
   if (!text) return;
@@ -28,14 +26,13 @@ async function sendHumanizedMessage(sock, jid, text) {
   
   await new Promise((resolve) => setTimeout(resolve, typingTime));
 
-  // 3. Para de digitar e envia (SEM CITAR A MENSAGEM ANTERIOR)
+  // 3. Para de digitar e envia
   await sock.sendPresenceUpdate("paused", jid);
   await sock.sendMessage(jid, { text });
 }
 
 /**
  * Registra todos os handlers de eventos para o socket.
- * @param {Object} sock - A instância do socket do Baileys.
  */
 export function registerEventHandlers(sock) {
   // Evento de participantes do grupo
@@ -51,7 +48,6 @@ export function registerEventHandlers(sock) {
         const banDetectado = await banCheckEntrada_Unique01(sock, grupoId, usuario);
         if (banDetectado) continue;
 
-        // Boas-vindas humanizada
         await sendHumanizedMessage(sock, grupoId, `👋 Olá @${numero}!\n\n${bvConfig.mensagem}`);
       } catch (e) {
         console.error("❌ Erro ao processar entrada no grupo:", e.message);
@@ -74,7 +70,7 @@ export function registerEventHandlers(sock) {
                  msg.message.extendedTextMessage?.text || 
                  (msg.message.imageMessage ? "[Imagem]" : "[Mídia]");
 
-    // Log visual no console
+    // Log visual no console (limpo)
     const typeLabel = isGroup ? "\x1b[35m[GRUPO]\x1b[0m" : "\x1b[32m[PV]\x1b[0m";
     console.log(`${typeLabel} \x1b[36m${pushName} (${senderNumber}):\x1b[0m ${text}`);
 
@@ -82,18 +78,24 @@ export function registerEventHandlers(sock) {
 
     try {
       botLoggerRegisterEvent_Unique01(msg);
-    } catch (e) {
-      console.error("❌ Erro ao salvar log:", e.message);
+    } catch (e) {}
+
+    // 1. VERIFICA SE É COMANDO TÉCNICO (PRIORIDADE)
+    const isCommand = text.startsWith("!") || text.startsWith("/");
+    if (isCommand) {
+      const commandResult = await handleCommand(sock, msg, text);
+      if (commandResult) {
+        await sendHumanizedMessage(sock, jid, commandResult);
+        return; // Interrompe para não passar pela IA
+      }
     }
 
-    // Lógica de resposta humanizada
+    // 2. LÓGICA DE RESPOSTA IA HUMANIZADA
     const botNumber = sock.user.id.split(":")[0];
     const isMentioned = text.includes(`@${botNumber}`) || 
                         msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes(botNumber + "@s.whatsapp.net");
-    const isCommand = text.startsWith("!") || text.startsWith("/");
 
-    if (!isGroup || isMentioned || isCommand) {
-      // Gerenciamento de fila para esperar o usuário terminar de digitar
+    if (!isGroup || isMentioned) {
       if (messageQueue.has(jid)) {
         clearTimeout(messageQueue.get(jid).timeout);
         const currentData = messageQueue.get(jid);
@@ -107,14 +109,12 @@ export function registerEventHandlers(sock) {
         });
       }
 
-      // Define o timeout para processar a resposta
       const queueData = messageQueue.get(jid);
       queueData.timeout = setTimeout(async () => {
         try {
           const fullText = queueData.messages.join(" ");
-          messageQueue.delete(jid); // Limpa a fila antes de processar
+          messageQueue.delete(jid);
 
-          // Prepara o objeto de mensagem consolidado para a IA
           const consolidatedMsg = { ...queueData.lastMsg };
           if (consolidatedMsg.message.conversation) {
             consolidatedMsg.message.conversation = fullText;
@@ -124,7 +124,6 @@ export function registerEventHandlers(sock) {
 
           const resposta = await clawBrainProcess_Unique01(consolidatedMsg);
           if (resposta && typeof resposta === "string") {
-            // ENVIA SEM CITAR A MENSAGEM (quoted: null)
             await sendHumanizedMessage(sock, jid, resposta);
           }
         } catch (e) {
