@@ -1,7 +1,7 @@
 import { botLoggerRegisterEvent_Unique01 } from "../utils/logger.js";
 import { atualizarGrupo_Unique03 } from "../utils/groups.js";
 import { banCheckEntrada_Unique01 } from "../commands/ban.js";
-import { lerBV } from "./index.js"; // Temporário até refatorar index.js completamente
+import { lerBV } from "./index.js";
 import { clawBrainProcess_Unique01 } from "./clawBrain.js";
 import { config } from "../config/index.js";
 
@@ -45,27 +45,47 @@ export function registerEventHandlers(sock) {
 
     const jid = msg.key.remoteJid;
     const isGroup = jid.endsWith("@g.us");
+    const pushName = msg.pushName || "Usuário";
+    const sender = msg.key.participant || msg.key.remoteJid;
+    const senderNumber = sender.replace(/@.*/, "");
+
+    const text = msg.message.conversation || 
+                 msg.message.extendedTextMessage?.text || 
+                 (msg.message.imageMessage ? "[Imagem]" : "[Mídia]");
+
+    // Log visual no console para a VPS
+    const typeLabel = isGroup ? "\x1b[35m[GRUPO]\x1b[0m" : "\x1b[32m[PV]\x1b[0m";
+    console.log(`${typeLabel} \x1b[36m${pushName} (${senderNumber}):\x1b[0m ${text}`);
 
     // Atualiza metadados do grupo se necessário
     if (isGroup) {
       await atualizarGrupo_Unique03(sock, jid);
     }
 
-    // Registra log da mensagem
+    // Registra log da mensagem no sistema de arquivos
     try {
       botLoggerRegisterEvent_Unique01(msg);
     } catch (e) {
-      console.error("❌ Erro ao salvar log:", e.message);
+      console.error("❌ Erro ao salvar log no arquivo:", e.message);
     }
 
-    // Processamento de IA e Comandos (será expandido no commandHandler)
-    try {
-      const resposta = await clawBrainProcess_Unique01(msg);
-      if (resposta && typeof resposta === "string") {
-        await sock.sendMessage(jid, { text: resposta });
+    // Lógica de resposta:
+    // 1. Se for PV, responde sempre.
+    // 2. Se for Grupo, responde se for marcado ou se for um comando.
+    const botNumber = sock.user.id.split(":")[0];
+    const isMentioned = text.includes(`@${botNumber}`) || 
+                        msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes(sock.user.id.split(":")[0] + "@s.whatsapp.net");
+    const isCommand = text.startsWith("!") || text.startsWith("/");
+
+    if (!isGroup || isMentioned || isCommand) {
+      try {
+        const resposta = await clawBrainProcess_Unique01(msg);
+        if (resposta && typeof resposta === "string") {
+          await sock.sendMessage(jid, { text: resposta }, { quoted: msg });
+        }
+      } catch (e) {
+        console.error("❌ Erro no processamento da mensagem:", e.message);
       }
-    } catch (e) {
-      console.error("❌ Erro no processamento da mensagem:", e.message);
     }
   });
 }
