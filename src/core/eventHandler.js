@@ -84,19 +84,24 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
-    // Trata diferentes tipos de mensagens
+    // DETECÇÃO DE ENQUETE (BAILEYS ESTRUTURA)
+    const pollCreation = msg.message.pollCreationMessage || 
+                         msg.message.pollCreationMessageV2 || 
+                         msg.message.pollCreationMessageV3;
+
+    if (pollCreation) {
+      const pollName = pollCreation.name;
+      const options = pollCreation.options.map(o => o.optionName);
+      console.log(`\x1b[34m[LEILÃO]\x1b[0m Enquete detectada: \x1b[33m${pollName}\x1b[0m`);
+      registerPoll(msg.key.id, jid, pollName, options);
+    }
+
+    // Trata diferentes tipos de mensagens para texto
     const text = msg.message.conversation || 
                  msg.message.extendedTextMessage?.text || 
                  (msg.message.imageMessage ? "[Imagem]" : 
-                  msg.message.pollCreationMessage ? `[Enquete: ${msg.message.pollCreationMessage.name}]` : 
+                  pollCreation ? `[Enquete: ${pollCreation.name}]` : 
                   "[Mídia]");
-
-    // Se for uma criação de enquete, registra no sistema de leilão
-    if (msg.message.pollCreationMessage) {
-      const poll = msg.message.pollCreationMessage;
-      const options = poll.options.map(o => o.optionName);
-      registerPoll(msg.key.id, jid, poll.name, options);
-    }
 
     // Log visual no console (limpo)
     const typeLabel = isGroup ? "\x1b[35m[GRUPO]\x1b[0m" : "\x1b[32m[PV]\x1b[0m";
