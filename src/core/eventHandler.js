@@ -47,18 +47,22 @@ export function registerEventHandlers(sock) {
     }
   });
 
-  // Evento de votos em enquetes
+  // --- CAPTURA DE VOTOS (EVENTO DE ATUALIZAÇÃO) ---
   sock.ev.on("messages.update", async (updates) => {
     for (const update of updates) {
-      if (update.update.pollUpdates) {
-        const pollUpdate = update.update.pollUpdates[0];
+      // DEBUG BRUTO PARA VER O QUE CHEGA NO VOTO
+      if (update.update.pollUpdates || update.update.pollUpdateMessage) {
+        console.log("🗳️ [DEBUG-VOTO-BRUTO] Detectada atualização de enquete!");
+        console.log(JSON.stringify(update, null, 2));
+        
+        const pollUpdate = update.update.pollUpdates ? update.update.pollUpdates[0] : update.update.pollUpdateMessage;
         const pollCreationId = update.key.id;
-        const voterJid = pollUpdate.voterJid;
+        const voterJid = pollUpdate.voterJid || update.key.participant;
         
-        console.log(`🗳️ [LEILÃO] Voto recebido de ${voterJid} na enquete ${pollCreationId}`);
-        
-        if (pollUpdate.vote && pollUpdate.vote.selectedOptions) {
+        if (pollUpdate && pollUpdate.vote && pollUpdate.vote.selectedOptions) {
           registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
+        } else if (pollUpdate && pollUpdate.selectedOptions) {
+          registerVote(pollCreationId, voterJid, pollUpdate.selectedOptions);
         }
       }
     }
@@ -75,29 +79,17 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
-    // --- DETECÇÃO PROFUNDA DE ENQUETE ---
-    // Procura em qualquer lugar da estrutura da mensagem por pollCreationMessage
-    const findPoll = (obj) => {
-      if (!obj || typeof obj !== 'object') return null;
-      if (obj.pollCreationMessage || obj.pollCreationMessageV2 || obj.pollCreationMessageV3) {
-        return obj.pollCreationMessage || obj.pollCreationMessageV2 || obj.pollCreationMessageV3;
-      }
-      for (const key in obj) {
-        const found = findPoll(obj[key]);
-        if (found) return found;
-      }
-      return null;
-    };
-
-    const pollCreation = findPoll(msg.message);
+    // DETECÇÃO DE ENQUETE (BAILEYS ESTRUTURA V1, V2, V3)
+    const pollCreation = msg.message.pollCreationMessage || 
+                         msg.message.pollCreationMessageV2 || 
+                         msg.message.pollCreationMessageV3;
 
     if (pollCreation) {
-      console.log(`📝 [LEILÃO] Enquete detectada via Deep Scan: ${pollCreation.name}`);
+      console.log(`📝 [LEILÃO] Enquete detectada: ${pollCreation.name}`);
       const pollName = pollCreation.name;
-      const options = pollCreation.options?.map(o => o.optionName) || [];
+      const options = pollCreation.options.map(o => o.optionName);
       registerPoll(msg.key.id, jid, pollName, options);
     }
-    // ------------------------------------
 
     // Trata diferentes tipos de mensagens para texto
     const text = msg.message.conversation || 
