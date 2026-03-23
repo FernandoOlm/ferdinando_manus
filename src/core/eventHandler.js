@@ -15,19 +15,12 @@ const messageQueue = new Map();
  */
 async function sendHumanizedMessage(sock, jid, text) {
   if (!text) return;
-
-  // 1. Simula "digitando..."
   await sock.sendPresenceUpdate("composing", jid);
-
-  // 2. Calcula tempo de digitação baseado no tamanho do texto
   const typingTime = Math.min(
     text.length * config.HUMAN_BEHAVIOR.TYPING_SPEED,
     config.HUMAN_BEHAVIOR.MAX_DELAY
   );
-  
   await new Promise((resolve) => setTimeout(resolve, typingTime));
-
-  // 3. Para de digitar e envia
   await sock.sendPresenceUpdate("paused", jid);
   await sock.sendMessage(jid, { text });
 }
@@ -42,13 +35,11 @@ export function registerEventHandlers(sock) {
     const grupoId = update.id;
     const bvConfig = lerBV(grupoId);
     if (!bvConfig || !bvConfig.ativo) return;
-
     for (const usuario of update.participants) {
       try {
         const numero = usuario.replace(/@.*/, "");
         const banDetectado = await banCheckEntrada_Unique01(sock, grupoId, usuario);
         if (banDetectado) continue;
-
         await sendHumanizedMessage(sock, grupoId, `👋 Olá @${numero}!\n\n${bvConfig.mensagem}`);
       } catch (e) {
         console.error("❌ Erro ao processar entrada no grupo:", e.message);
@@ -64,7 +55,8 @@ export function registerEventHandlers(sock) {
         const pollCreationId = update.key.id;
         const voterJid = pollUpdate.voterJid;
         
-        // Registra o voto no sistema de leilão
+        console.log(`🗳️ [DEBUG-VOTO] Recebido voto de ${voterJid} na enquete ${pollCreationId}`);
+        
         if (pollUpdate.vote && pollUpdate.vote.selectedOptions) {
           registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
         }
@@ -83,17 +75,22 @@ export function registerEventHandlers(sock) {
     const sender = msg.key.participant || msg.key.remoteJid;
     const senderNumber = sender.replace(/@.*/, "");
 
-    // DETECÇÃO DE ENQUETE (BAILEYS ESTRUTURA V1, V2, V3)
+    // --- DEBUG BRUTO DE ENQUETE ---
     const pollCreation = msg.message.pollCreationMessage || 
                          msg.message.pollCreationMessageV2 || 
                          msg.message.pollCreationMessageV3;
 
     if (pollCreation) {
+      console.log(`📝 [DEBUG-ENQUETE] Detectada criação de enquete!`);
+      console.log(`📝 [DEBUG-ENQUETE] Nome: ${pollCreation.name}`);
+      console.log(`📝 [DEBUG-ENQUETE] Opções: ${pollCreation.options?.map(o => o.optionName).join(", ")}`);
+      console.log(`📝 [DEBUG-ENQUETE] ID da Mensagem: ${msg.key.id}`);
+      
       const pollName = pollCreation.name;
       const options = pollCreation.options.map(o => o.optionName);
-      console.log(`\x1b[34m[LEILÃO]\x1b[0m Enquete detectada: \x1b[33m${pollName}\x1b[0m`);
       registerPoll(msg.key.id, jid, pollName, options);
     }
+    // ------------------------------
 
     // Trata diferentes tipos de mensagens para texto
     const text = msg.message.conversation || 
