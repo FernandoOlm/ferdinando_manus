@@ -1,103 +1,69 @@
-/* INÍCIO all.js — /all 100% corrigido */
-
 import fs from "fs";
-import path from "path";   // ✅ CORRIGIDO: faltava esse import para path.resolve
+import path from "path";
+import { config } from "../config/index.js";
 
-const AUTH_PATH = path.resolve("src/data/auth/allowed.json");
-
-// =============================================================
-// 🔧 NORMALIZADOR DE ID
-// =============================================================
-function normalizarUserIdFerdinando(raw) {
+/**
+ * Normaliza o ID do usuário para comparação.
+ */
+function normalizeId(raw) {
   if (!raw) return "";
   let digits = raw.replace(/\D/g, "");
   if (digits.length > 15) digits = digits.slice(-15);
   return digits;
 }
 
-// =============================================================
-// 📦 Carregar JSON de permissões
-// =============================================================
-function loadJSON() {
-  return JSON.parse(fs.readFileSync(AUTH_PATH));
-}
-
-// =============================================================
-// 🚨 COMANDO /all
-// =============================================================
-export async function comandoAll(msg, sock, fromClean, textoOriginal) {
+/**
+ * Comando !all - Marca todos os membros do grupo.
+ */
+export async function comandoAll(msg, sock, fromClean, args) {
   const jid = msg.key.remoteJid;
 
-  // Validar se é grupo
   if (!jid.endsWith("@g.us")) {
-    return { status: "erro", tipo: "all", motivo: "nao_grupo" };
+    return "Esse comando só funciona em grupos, mano. 🏢";
   }
 
-  // Carregar banco
-  const db = loadJSON();
+  try {
+    // 1. Buscar membros do grupo
+    const metadata = await sock.groupMetadata(jid);
+    const participants = metadata.participants.map(p => p.id);
 
-  if (!db.grupos[jid]) {
-    return { status: "erro", tipo: "all", motivo: "grupo_sem_autorizacao" };
+    // 2. Verificar permissão (Admin do grupo ou ROOT)
+    const senderNumber = normalizeId(fromClean);
+    const isAdmin = metadata.participants.some(
+      p => normalizeId(p.id) === senderNumber && (p.admin === "admin" || p.admin === "superadmin")
+    );
+    const isRoot = senderNumber === config.ROOT_ID.replace(/@.*/, "");
+
+    // Também verifica no arquivo de autorizados como fallback
+    let isAuthorized = false;
+    try {
+      if (fs.existsSync(config.PATHS.AUTH)) {
+        const authDB = JSON.parse(fs.readFileSync(config.PATHS.AUTH, "utf8"));
+        isAuthorized = authDB.grupos[jid]?.autorizados?.includes(senderNumber);
+      }
+    } catch (e) {}
+
+    if (!isAdmin && !isRoot && !isAuthorized) {
+      return "Só os admins ou autorizados podem chamar a galera toda, blz? 🚫";
+    }
+
+    // 3. Preparar a mensagem
+    const textArg = Array.isArray(args) ? args.join(" ").trim() : "";
+    const messageText = textArg.length > 0 ? textArg : "🔔 Atenção geral aqui!";
+
+    // 4. Enviar as mensagens (Ping + Mensagem)
+    // Primeiro um ping discreto
+    await sock.sendMessage(jid, { text: "📣 *CHAMADA GERAL* 📣", mentions: participants });
+    
+    // Depois a mensagem real
+    await sock.sendMessage(jid, { 
+      text: `📢 ${messageText}`, 
+      mentions: participants 
+    });
+
+    return { status: "ok", total: participants.length };
+  } catch (e) {
+    console.error("❌ Erro no comando !all:", e.message);
+    return "Deu um erro aqui ao tentar chamar todo mundo... 😵";
   }
-
-  const grupo = db.grupos[jid];
-
-  // Normalizar ID do admin
-  const fromCleanNormalizado = normalizarUserIdFerdinando(fromClean);
-
-  // DEBUG
-  //console.log("====== DEBUG /all ======");
-  //console.log("JID:", jid);
-  //console.log("fromClean RAW:", fromClean);
-  //console.log("fromClean NORMALIZADO:", fromCleanNormalizado);
-  //console.log("Autorizados:", grupo.autorizados);
-  //console.log(
-  //  "Autorizado?:",
-  //  grupo.autorizados.includes(fromCleanNormalizado)
-  //);
-  //console.log("========================");
-
-  // Validar autorização
-  if (!grupo.autorizados.includes(fromCleanNormalizado)) {
-    return { status: "erro", tipo: "all", motivo: "nao_autorizado" };
-  }
-
-  // Buscar membros do grupo
-  const meta = await sock.groupMetadata(jid);
-  const ids = meta.participants.map((p) => p.id);
-
-  // Primeiro disparo (ping)
-  await sock.sendMessage(jid, {
-    text: "🔔",
-    mentions: ids,
-  });
-
-  // Tratar mensagem
-  let textoOriginalStr = "";
-  if (Array.isArray(textoOriginal)) {
-    textoOriginalStr = textoOriginal.join(" ").trim();
-  } else if (typeof textoOriginal === "string") {
-    textoOriginalStr = textoOriginal.trim();
-  }
-
-  const mensagemFinal =
-    textoOriginalStr.length > 0
-      ? textoOriginalStr
-      : grupo.mensagemAll || "🔔 Atenção! Mensagem geral enviada!";
-
-  await sock.sendMessage(jid, {
-    text: mensagemFinal,
-    mentions: ids,
-  });
-
-  return {
-    status: "ok",
-    tipo: "all",
-    nomeGrupo: grupo.nome,
-    totalMembros: ids.length,
-    textoOriginal,
-    mensagemUsada: mensagemFinal,
-  };
 }
-
-/* FIM all.js */

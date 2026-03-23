@@ -82,7 +82,6 @@ export async function handleCommand(sock, msg, text) {
     }
 
     // Executa o comando
-    // Passamos os argumentos corretamente para as funções
     const result = await fn(msg, sock, senderNumber, args.slice(1));
 
     // Se a função já enviou a mensagem (como o !all faz), retornamos null para não duplicar
