@@ -5,6 +5,7 @@ import { lerBV } from "./index.js";
 import { clawBrainProcess_Unique01 } from "./clawBrain.js";
 import { handleCommand } from "./commandHandler.js";
 import { config } from "../config/index.js";
+import { registerPoll, registerVote } from "../commands/leilao.js";
 
 // Fila de mensagens para comportamento humano
 const messageQueue = new Map();
@@ -64,10 +65,10 @@ export function registerEventHandlers(sock) {
         const voterJid = pollUpdate.voterJid;
         const voterNumber = voterJid.split("@")[0];
         
-        // O Baileys envia o voto criptografado, mas podemos logar que houve um voto
-        console.log(`\x1b[34m[ENQUETE]\x1b[0m Voto recebido de \x1b[36m${voterNumber}\x1b[0m na enquete \x1b[33m${pollCreationId}\x1b[0m`);
+        // Registra o voto no sistema de leilão
+        registerVote(pollCreationId, voterJid, pollUpdate.vote.selectedOptions);
         
-        // Aqui você poderia implementar uma lógica para contar os votos se descriptografar
+        console.log(`\x1b[34m[LEILÃO]\x1b[0m Voto recebido de \x1b[36m${voterNumber}\x1b[0m na enquete \x1b[33m${pollCreationId}\x1b[0m`);
       }
     }
   });
@@ -89,6 +90,13 @@ export function registerEventHandlers(sock) {
                  (msg.message.imageMessage ? "[Imagem]" : 
                   msg.message.pollCreationMessage ? `[Enquete: ${msg.message.pollCreationMessage.name}]` : 
                   "[Mídia]");
+
+    // Se for uma criação de enquete, registra no sistema de leilão
+    if (msg.message.pollCreationMessage) {
+      const poll = msg.message.pollCreationMessage;
+      const options = poll.options.map(o => o.optionName);
+      registerPoll(msg.key.id, jid, poll.name, options);
+    }
 
     // Log visual no console (limpo)
     const typeLabel = isGroup ? "\x1b[35m[GRUPO]\x1b[0m" : "\x1b[32m[PV]\x1b[0m";
