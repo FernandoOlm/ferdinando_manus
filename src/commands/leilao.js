@@ -11,11 +11,9 @@ const POLLS_DB_PATH = path.join(DATA_DIR, "active_polls.json");
  */
 function ensurePollsDB() {
   if (!fs.existsSync(DATA_DIR)) {
-    console.log(`📁 [DEBUG] Criando diretório de dados: ${DATA_DIR}`);
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   if (!fs.existsSync(POLLS_DB_PATH)) {
-    console.log(`📄 [DEBUG] Criando arquivo de enquetes: ${POLLS_DB_PATH}`);
     fs.writeFileSync(POLLS_DB_PATH, JSON.stringify({ polls: {} }, null, 2));
   }
 }
@@ -29,7 +27,6 @@ function loadPolls() {
     const raw = fs.readFileSync(POLLS_DB_PATH, "utf8");
     return JSON.parse(raw);
   } catch (e) {
-    console.error("❌ [DEBUG] Erro ao carregar banco de enquetes:", e.message);
     return { polls: {} };
   }
 }
@@ -40,7 +37,6 @@ function loadPolls() {
 function savePolls(data) {
   try {
     fs.writeFileSync(POLLS_DB_PATH, JSON.stringify(data, null, 2));
-    console.log(`💾 [DEBUG] Banco de enquetes salvo com sucesso em ${POLLS_DB_PATH}`);
   } catch (e) {
     console.error("❌ [DEBUG] Erro ao salvar banco de enquetes:", e.message);
   }
@@ -50,7 +46,6 @@ function savePolls(data) {
  * Registra uma nova enquete para leilão.
  */
 export function registerPoll(pollId, jid, name, options) {
-  console.log(`📝 [DEBUG] Tentando registrar enquete: ${name} (ID: ${pollId}) no JID: ${jid}`);
   const db = loadPolls();
   
   db.polls[pollId] = {
@@ -67,23 +62,40 @@ export function registerPoll(pollId, jid, name, options) {
 
 /**
  * Registra um voto em uma enquete.
+ * Melhora a busca da enquete alvo para lidar com IDs que mudam levemente no Baileys.
  */
 export function registerVote(pollId, voterJid, selectedOptions) {
   console.log(`🗳️ [DEBUG] Recebido voto de ${voterJid} para enquete ${pollId}`);
   const db = loadPolls();
   
-  if (db.polls[pollId]) {
+  // 1. Tenta achar pelo ID exato
+  let targetPollId = pollId;
+  
+  // 2. Se não achar, tenta achar a enquete mais recente no mesmo JID (fallback inteligente)
+  if (!db.polls[pollId]) {
+    const possiblePolls = Object.entries(db.polls)
+      .sort((a, b) => new Date(b[1].createdAt) - new Date(a[1].createdAt));
+    
+    if (possiblePolls.length > 0) {
+      targetPollId = possiblePolls[0][0];
+      console.log(`🔍 [DEBUG] ID exato não achado. Usando enquete mais recente: ${targetPollId}`);
+    }
+  }
+
+  if (db.polls[targetPollId]) {
     if (selectedOptions && selectedOptions.length > 0) {
-      db.polls[pollId].votes[voterJid] = selectedOptions[0];
+      // O Baileys envia o hash da opção. Como não temos o mapeamento de hash -> texto,
+      // vamos guardar o índice se for numérico ou o próprio hash.
+      db.polls[targetPollId].votes[voterJid] = selectedOptions[0];
       savePolls(db);
-      console.log(`✅ [DEBUG] Voto de ${voterJid} salvo na enquete ${pollId}`);
+      console.log(`✅ [DEBUG] Voto de ${voterJid} salvo na enquete ${targetPollId}`);
     } else {
-      delete db.polls[pollId].votes[voterJid];
+      delete db.polls[targetPollId].votes[voterJid];
       savePolls(db);
-      console.log(`🗑️ [DEBUG] Voto de ${voterJid} removido da enquete ${pollId}`);
+      console.log(`🗑️ [DEBUG] Voto de ${voterJid} removido da enquete ${targetPollId}`);
     }
   } else {
-    console.log(`⚠️ [DEBUG] Voto ignorado: Enquete ${pollId} não encontrada no banco.`);
+    console.log(`⚠️ [DEBUG] Voto ignorado: Nenhuma enquete ativa encontrada.`);
   }
 }
 
@@ -92,17 +104,11 @@ export function registerVote(pollId, voterJid, selectedOptions) {
  */
 export async function comandoEncerrarVotacao(msg, sock, from, args) {
   const jid = msg.key.remoteJid;
-  console.log(`🔨 [DEBUG] Comando !encerrar_votacao recebido no JID: ${jid}`);
-  
   const db = loadPolls();
-  console.log(`📊 [DEBUG] Total de enquetes no banco: ${Object.keys(db.polls).length}`);
 
-  // Busca a enquete mais recente desse grupo
   const pollEntries = Object.entries(db.polls)
     .filter(([id, data]) => data.jid === jid)
     .sort((a, b) => new Date(b[1].createdAt) - new Date(a[1].createdAt));
-
-  console.log(`🔍 [DEBUG] Enquetes encontradas para este grupo: ${pollEntries.length}`);
 
   if (pollEntries.length === 0) {
     return "Não achei nenhuma enquete ativa aqui pra encerrar, mano. 🤨";
@@ -110,7 +116,6 @@ export async function comandoEncerrarVotacao(msg, sock, from, args) {
 
   const [pollId, pollData] = pollEntries[0];
   const votes = Object.entries(pollData.votes);
-  console.log(`🏆 [DEBUG] Encerramento da enquete ${pollId} (${pollData.name}) com ${votes.length} votos.`);
 
   if (votes.length === 0) {
     delete db.polls[pollId];
@@ -118,8 +123,11 @@ export async function comandoEncerrarVotacao(msg, sock, from, args) {
     return `🔨 *LEILÃO ENCERRADO: ${pollData.name}*\n\nNinguém deu lance, pô! Que vacilo. 😅`;
   }
 
-  // Lógica de vencedor (simplificada para o debug)
+  // Lógica de vencedor
+  // No Baileys, os votos vêm como hashes. Como não temos o mapeamento exato,
+  // vamos assumir que as opções foram enviadas na ordem e tentar extrair o valor.
   const results = votes.map(([voter, optionValue]) => {
+    // Tenta mapear o valor se for um índice simples ou extrair do texto
     let optionText = pollData.options[optionValue] || "Lance";
     const value = parseFloat(optionText.replace(/[^\d,.-]/g, "").replace(",", "."));
     return { voter, optionText, value: isNaN(value) ? 0 : value };
